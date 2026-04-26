@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#000000"/>
+  <g fill="#ffffff">
+    <!-- カメラ本体 -->
+    <rect x="64" y="160" width="384" height="240" rx="32"/>
+    <!-- 上部のシュー -->
+    <rect x="176" y="120" width="160" height="56" rx="12"/>
+  </g>
+  <!-- レンズ外枠 -->
+  <circle cx="256" cy="280" r="92" fill="#000000"/>
+  <!-- レンズ内 -->
+  <circle cx="256" cy="280" r="68" fill="#222222" stroke="#888888" stroke-width="6"/>
+  <!-- レンズ反射 -->
+  <circle cx="232" cy="256" r="18" fill="#ffffff" fill-opacity="0.5"/>
+  <!-- 右上のフラッシュ窓 -->
+  <rect x="380" y="190" width="40" height="20" rx="4" fill="#fbbf24"/>
+</svg>
