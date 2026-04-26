@@ -1,138 +1,117 @@
 # Silent Camera
 
-シャッター音の鳴らないカメラ PWA。iOS Safari で `getUserMedia` 経由のため、日本版 iOS 標準カメラの音声強制を回避できる。
+シャッター音を鳴らさずに撮影できる、iPhone 用の Web カメラアプリ (PWA)。
 
-## ステータス
+日本で販売される iPhone のカメラアプリは、業界自主規制によりシャッター音を消せない。一方で、ブラウザの `getUserMedia` API はこの制約の対象外。本アプリは Safari 上で動くカメラを `<video>` + `<canvas>` で実装し、画像を完全無音で撮影する。
 
-Step 1〜3 完了:
+## デモ
 
-- カメラプレビュー(背面カメラ)
-- シャッターボタンによる無音撮影 (Canvas → JPEG Blob)
-- IndexedDB への保存 + 直近サムネ表示
-- 撮影時の白フラッシュ視覚フィードバック
+🌐 **[https://nyantaro-jp.github.io/silent-camera/](https://nyantaro-jp.github.io/silent-camera/)**
 
-未実装(後続 Step):
+iPhone Safari で開いてホーム画面に追加すると、ネイティブアプリのようにフルスクリーン起動できる。
 
-- 前後カメラ切替 / ズーム / トーチ / タイマー / グリッド
-- 履歴一覧画面・共有・削除
-- ホーム画面追加ガイド
-- 解像度設定
+<!-- TODO: docs/screenshots/ 以下にスクショを置けば下が表示される -->
+<p align="center">
+  <img src="docs/screenshots/main.jpg" alt="撮影画面" width="220" />
+  <img src="docs/screenshots/history.jpg" alt="履歴画面" width="220" />
+  <img src="docs/screenshots/detail.jpg" alt="拡大表示" width="220" />
+</p>
 
-## 必要環境
+## 機能
 
-- Node.js 20+
-- iPhone (iOS Safari) で実機確認
-- HTTPS 環境(GitHub Pages なら自動)
+- **完全無音シャッター** — Audio API 系を一切使わずに撮影
+- **前後カメラ切替** — フロント時は左右ミラー
+- **ズーム** — ピンチジェスチャー / 1x・2x・5x クイックボタン / スライダー
+- **撮影タイマー** — 3秒 / 10秒 + キャンセル可能なカウントダウン
+- **グリッド表示** — 三分割線オーバーレイ
+- **ライト** — トーチ対応端末は LED、未対応(iOS Safari の大半)は画面光フォールバック
+- **解像度切替** — 高 / 中 / 低 (容量節約用)
+- **撮影履歴** — 端末内 IndexedDB に保存、サムネ一覧 / 拡大表示 / 削除
+- **写真アプリへ保存** — Web Share API (iOS シェアシート → 「画像を保存」)
+- **PWA** — ホーム画面追加 / オフライン動作 / 画面スリープ抑止 (Wake Lock)
 
-## セットアップ
+## iPhone での使い方
 
-```bash
-npm install
-npm run dev      # http://localhost:5173 — PC ブラウザでは UI 確認のみ
-npm run build    # アイコン生成 + 型チェック + プロダクションビルド
-```
+1. Safari で上記 URL を開く
+2. 「カメラを開始」をタップ → カメラ権限を許可
+3. シャッターボタンで撮影 (**音は鳴らない**)
+4. ホーム画面に追加: Safari 共有ボタン (□に↑) → 「ホーム画面に追加」
+5. 写真アプリに保存: 履歴画面 → 拡大表示 → 「共有 / 写真に保存」 → シェアシートから「画像を保存」
 
-## ローカルで iPhone 実機確認する方法
+## プライバシー
 
-`getUserMedia` は HTTPS 必須。localhost なら HTTP でも動くが、iPhone から LAN 越しに見るときは HTTPS が要る。
+撮影した画像は **端末内の IndexedDB のみ** に保存され、いかなる外部サーバーにも送信されない。Service Worker のキャッシュ対象もアプリの静的アセット (JS/CSS/SVG/PNG) だけで、撮影画像は含まれない。
 
-### 方法 A: mkcert + LAN
+通信ログ・アクセス解析・第三者 SDK は一切組み込まれていない。
 
-```bash
-brew install mkcert            # macOS。Windows は scoop install mkcert
-mkcert -install
-mkcert localhost 192.168.x.x   # PC の LAN 内 IP
-```
+## 技術スタック
 
-`vite.config.ts` の `server` を以下のように差し替え:
+| | 採用理由 |
+|---|---|
+| **Vite + React + TypeScript** | dev サーバ起動が速く、状態が複数ある UI を型付きで扱う Hook ベースで完結させたかった |
+| **Tailwind CSS** | モバイル + ダーク固定の UI なので class 名が肥大化しない範囲で十分。デザイントークン管理も不要 |
+| **vite-plugin-pwa** | Workbox ラッパーで SW + manifest を自動生成。`autoUpdate` で更新フローも単純化 |
+| **idb (IndexedDB ラッパー)** | 撮影画像 (画像 Blob) は localStorage 上限 5MB を簡単に超えるため、唯一の選択肢 |
+| **@resvg/resvg-js** | アイコン PNG を build 時に SVG から生成。Rust 製で軽量、ネイティブビルド不要 |
+| **GitHub Actions + GitHub Pages** | 静的サイトなので最小構成。`main` push → 自動デプロイ |
 
-```ts
-import fs from 'node:fs';
-// ...
-server: {
-  host: true,
-  https: {
-    key: fs.readFileSync('./localhost+1-key.pem'),
-    cert: fs.readFileSync('./localhost+1.pem'),
-  },
-}
-```
+## 設計判断
 
-iPhone から `https://192.168.x.x:5173/silent-camera/` にアクセス。
+### 1. 完全無音の保証
 
-### 方法 B: ngrok 等のトンネル
+`<audio>`、`new Audio()`、Web Audio API、`navigator.vibrate` を**ソースコード全体で 1 箇所も使わない**ことを設計上の制約として置いた。シャッターフィードバックは視覚のみ(撮影瞬間の白フラッシュ + 直近サムネ更新)。
 
-```bash
-npx ngrok http 5173
-```
+iOS のカメラが音を鳴らせない実装になっているのは AVFoundation 内部の制約。本アプリは `getUserMedia` 経由で MediaStream を取得するためその制約の外側にあり、結果として音を**出すコードが無いから鳴らない**という素直な実装で完全無音が成立する。
 
-発行された HTTPS URL に iPhone でアクセス。
+### 2. プライバシー重視のクライアント完結
 
-### 方法 C: GitHub Pages 経由(推奨・最初はこれ)
+撮影画像は IndexedDB に Blob として保存され、外部送信は一切しない。バックエンドが存在しないため、SQLi / SSRF / セッションハイジャック等のサーバー側リスクが構造的に発生しない。React のデフォルトエスケープに任せ `dangerouslySetInnerHTML` も使わないことで DOM-based XSS も封じている。
 
-`main` に push すれば GitHub Actions が自動でビルド & デプロイ。数分で
-`https://<your-user>.github.io/silent-camera/` で見られる。
+### 3. iOS Safari 固有の制約への対処
 
-## GitHub Pages 公開手順
+| 制約 | 対処 |
+|---|---|
+| `<video>` の自動再生は `playsInline` + `muted` 必須 | JSX で `playsInline autoPlay muted` を確実に付与 |
+| `srcObject` を assign する時点で video 要素がマウントされていない | `useEffect([stream])` で attach、CameraView 表示後に確実に走らせる |
+| `MediaTrackConstraintSet.torch` 未実装 | `getCapabilities().torch` で判定 → 未対応なら撮影直前に画面全体を白くする「画面光ライト」で代替 |
+| `beforeinstallprompt` 未実装 | iOS 検出して、共有ボタンの位置と手順を案内するモーダルを自前で実装 |
+| Wake Lock は iOS 16.4+ | `'wakeLock' in navigator` でガード、未対応端末は素通し |
 
-1. GitHub で **Public** リポジトリを `silent-camera` という名前で作成
-2. ローカルで初コミット → push:
-   ```bash
-   git init
-   git add .
-   git commit -m "initial commit (Step 1-3 silent camera)"
-   git branch -M main
-   git remote add origin https://github.com/<your-user>/silent-camera.git
-   git push -u origin main
-   ```
-3. GitHub の **Settings → Pages → Build and deployment → Source** を `GitHub Actions` に変更
-4. **Actions** タブで初回ワークフローの完了を待つ
-5. 表示された URL を iPhone Safari で開く
+### 4. ストリーム管理の徹底
 
-リポジトリ名を `silent-camera` 以外にする場合は `vite.config.ts` の `base` も合わせて変更すること。
+`getUserMedia` で取得したストリームは、**前後切替 / 解像度変更 / コンポーネントアンマウント時に必ず `track.stop()`** を呼ぶ。これを怠るとカメラが回りっぱなしになりバッテリー消費とインジケーター LED 点灯が止まらない。`useEffect` の cleanup で集中管理している。
 
-## iPhone で「ホーム画面に追加」する手順
+### 5. PWA としてのフルスクリーン化
 
-1. Safari で公開 URL を開く
-2. 共有ボタン(□に↑) → 「ホーム画面に追加」
-3. ホーム画面のアイコンから起動するとフルスクリーン (standalone) で動く
+`apple-mobile-web-app-capable` + `viewport-fit=cover` + `env(safe-area-inset-*)` でノッチ対応のフルスクリーン化、`display: standalone` で URL バー非表示、Service Worker でオフライン動作を担保。撮影機能はオフラインでも動く。
 
-## 動作確認チェックリスト (Step 3 時点)
-
-- [ ] iPhone Safari でアクセスできる
-- [ ] 「カメラを開始」をタップして権限を許可するとプレビューが映る
-- [ ] **シャッターを押しても音が鳴らない**(静かな部屋で要確認)
-- [ ] 撮影後に左下サムネが直近画像に更新される
-- [ ] アプリを閉じて再起動してもサムネが残っている (IndexedDB 永続化)
-
-## ファイル構成
+## ファイル構成 (概要)
 
 ```
-silent-camera/
-  index.html
-  vite.config.ts
-  scripts/gen-icons.mjs       SVG → PNG (192/512) 生成
-  public/
-    camera-icon.svg           マスターアイコン (黒地+白カメラ)
-    icon-192.png, icon-512.png, apple-touch-icon.png  build 時に生成
-    favicon.svg
-  src/
-    main.tsx
-    App.tsx
-    pages/CameraPage.tsx      メイン画面
-    components/
-      CameraView.tsx          <video> ラッパー (playsinline + muted)
-      Controls.tsx            下部コントロールバー
-    lib/
-      camera.ts               getUserMedia ラッパー
-      capture.ts              Canvas → Blob
-      storage.ts              IndexedDB (idb)
-    styles/globals.css
+src/
+  pages/        画面 (CameraPage / HistoryPage / PhotoDetailPage)
+  components/   再利用 UI (TopBar / Controls / Grid / ZoomControl 等)
+  lib/          ロジック (camera / capture / storage / share / wakelock / settings)
+  types/        TypeScript 型拡張 (zoom/torch)
+  styles/       Tailwind + 撮影フラッシュアニメ
 ```
 
-## 既知のリスク
+詳細とコンポーネント単位の責務は [DEVELOPMENT.md](./DEVELOPMENT.md) を参照。
 
-- iOS Safari は `MediaTrackConstraints.torch` 未対応 → ライト機能は画面フラッシュで代替予定 (Step 6)
-- `beforeinstallprompt` 非対応 → ホーム画面追加は手動ガイドのみ
+## 今後の展望
 
-詳細な開発メモは [NOTES.md](./NOTES.md) を参照。
+- [ ] 連写モード (シャッター長押し → 数枚連続)
+- [ ] 露出補正 (`MediaTrackConstraintSet.exposureCompensation` を使った露出スライダー)
+- [ ] EXIF 情報の付与 (撮影日時はファイル名で対応済みだが、EXIF 自体は未付与)
+- [ ] iOS 写真アプリへの自動保存 (現在は Web Share API のタップ 1 回経由)
+- [ ] 動画撮影 (MediaRecorder API)
+
+## 開発
+
+開発手順とローカル iPhone 実機確認方法は [DEVELOPMENT.md](./DEVELOPMENT.md)。
+
+開発中の判断記録とハマりどころメモは [NOTES.md](./NOTES.md)。
+
+## ライセンス
+
+[MIT](./LICENSE)
