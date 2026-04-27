@@ -323,7 +323,7 @@ export function CameraPage({ onOpenHistory, onPhotoSaved }: Props) {
         <StartScreen
           onStart={() => start()}
           title="カメラ権限が必要です"
-          subtitle="iOS 設定 → Safari → カメラ で許可してから再試行してください"
+          subtitle={getDeniedHelp()}
           buttonLabel="再試行"
         />
       )}
@@ -414,4 +414,17 @@ function CenterMessage({ text }: { text: string }) {
       <p className="text-sm text-white/70">{text}</p>
     </div>
   );
+}
+
+/** カメラ権限拒否時の案内文を OS 別に出し分ける。 */
+function getDeniedHelp(): string {
+  if (typeof navigator === 'undefined') return '';
+  const ua = navigator.userAgent;
+  if (/iPad|iPhone|iPod/.test(ua)) {
+    return 'iOS 設定 → Safari → カメラ で許可してから再試行してください';
+  }
+  if (/Android/.test(ua)) {
+    return 'アドレスバー左の 🔒 アイコン → 権限 → カメラ を「許可」にしてページを更新してください。または Chrome の ⋮ → 設定 → サイト設定 → カメラ から該当サイトを許可';
+  }
+  return 'アドレスバー左の鍵アイコンからカメラ権限を許可してから再試行してください';
 }
