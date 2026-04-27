@@ -19,6 +19,11 @@ const RES_MAP: Record<Resolution, { width: number; height: number } | null> = {
 /**
  * カメラを起動して MediaStream を返す。
  * audio:false 固定 + バイブ・音声系も使わない方針 → 完全無音。
+ *
+ * Android Chrome は `facingMode: { ideal }` + 解像度制約を併用すると、
+ * 解像度を優先してフロントカメラが選ばれることがある (特に高解像度)。
+ * 対策として、まず `exact` で要求 → 満たせない端末では `ideal` でフォールバック
+ * する 2 段構えにしている。
  */
 export async function startCamera(options: StartCameraOptions = {}): Promise<MediaStream> {
   if (!navigator.mediaDevices?.getUserMedia) {
@@ -28,15 +33,26 @@ export async function startCamera(options: StartCameraOptions = {}): Promise<Med
   const { facing = 'environment', resolution = 'high' } = options;
   const dim = RES_MAP[resolution];
 
-  const constraints: MediaStreamConstraints = {
+  const buildConstraints = (
+    mode: ConstrainDOMString,
+  ): MediaStreamConstraints => ({
     audio: false,
     video: {
-      facingMode: { ideal: facing },
+      facingMode: mode,
       ...(dim ? { width: { ideal: dim.width }, height: { ideal: dim.height } } : {}),
     },
-  };
+  });
 
-  return await navigator.mediaDevices.getUserMedia(constraints);
+  try {
+    return await navigator.mediaDevices.getUserMedia(buildConstraints({ exact: facing }));
+  } catch (e) {
+    const name = (e as DOMException).name;
+    // 指定 facing のカメラが無い端末では exact が失敗する。ideal でフォールバック。
+    if (name === 'OverconstrainedError' || name === 'NotFoundError' || name === 'NotReadableError') {
+      return await navigator.mediaDevices.getUserMedia(buildConstraints({ ideal: facing }));
+    }
+    throw e;
+  }
 }
 
 export function stopStream(stream: MediaStream | null | undefined): void {
