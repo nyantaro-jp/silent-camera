@@ -2,7 +2,7 @@
 
 シャッター音を鳴らさずに撮影できる、iPhone 用の Web カメラアプリ (PWA)。
 
-日本で販売される iPhone のカメラアプリは、業界自主規制によりシャッター音を消せない。一方で、ブラウザの `getUserMedia` API はこの制約の対象外。本アプリは Safari 上で動くカメラを `<video>` + `<canvas>` で実装し、画像を完全無音で撮影する。
+日本で販売される iPhone のカメラアプリは、業界自主規制によりシャッター音を消せない。一方で、ブラウザの `getUserMedia` API はこの制約の対象外。本アプリは Safari 上で動くカメラを `<video>` + `<canvas>` で実装し、画像を完全無音で撮影する。**Android Chrome にも対応**しており、こちらでは無音 + 本物のトーチ + ピンチズームが揃う。
 
 ## デモ
 
@@ -38,6 +38,27 @@ iPhone Safari で開いてホーム画面に追加すると、ネイティブア
 4. ホーム画面に追加: Safari 共有ボタン (□に↑) → 「ホーム画面に追加」
 5. 写真アプリに保存: 履歴画面 → 拡大表示 → 「共有 / 写真に保存」 → シェアシートから「画像を保存」
 
+## Android での使い方
+
+1. Chrome で上記 URL を開く
+2. カメラ権限を許可
+3. シャッターボタンで撮影
+4. 起動時に「**インストール**」ボタンが出るのでタップ → ホーム画面とアプリ一覧に追加される (`beforeinstallprompt` 経由でネイティブ風)
+5. 写真への保存: 履歴 → 拡大 → 「共有」→ Google フォト or ダウンロード
+
+### iOS / Android の機能対応差
+
+| 機能 | iOS Safari | Android Chrome |
+|---|---|---|
+| 完全無音シャッター | ✅ | ✅ |
+| 前後カメラ切替 | ✅ | ✅ |
+| ピンチズーム | △ 端末次第 | ✅ ほぼ動く |
+| **本物の LED トーチ** | ❌ → 画面光フォールバック | ✅ **使える** |
+| Web Share API で写真へ保存 | ✅ (15+) | ✅ |
+| `beforeinstallprompt` ボタン | ❌ → 手動ガイド | ✅ |
+| Wake Lock (画面スリープ抑止) | ✅ (16.4+) | ✅ |
+| システム戻るボタン | iOS のスワイプ戻る | ✅ Android 戻るボタン |
+
 ## プライバシー
 
 撮影した画像は **端末内の IndexedDB のみ** に保存され、いかなる外部サーバーにも送信されない。Service Worker のキャッシュ対象もアプリの静的アセット (JS/CSS/SVG/PNG) だけで、撮影画像は含まれない。
@@ -67,15 +88,16 @@ iOS のカメラが音を鳴らせない実装になっているのは AVFoundat
 
 撮影画像は IndexedDB に Blob として保存され、外部送信は一切しない。バックエンドが存在しないため、SQLi / SSRF / セッションハイジャック等のサーバー側リスクが構造的に発生しない。React のデフォルトエスケープに任せ `dangerouslySetInnerHTML` も使わないことで DOM-based XSS も封じている。
 
-### 3. iOS Safari 固有の制約への対処
+### 3. プラットフォーム差異の吸収 (iOS Safari と Android Chrome)
 
-| 制約 | 対処 |
+| 制約 / 差異 | 対処 |
 |---|---|
-| `<video>` の自動再生は `playsInline` + `muted` 必須 | JSX で `playsInline autoPlay muted` を確実に付与 |
+| `<video>` の自動再生は `playsInline` + `muted` 必須 (iOS) | JSX で `playsInline autoPlay muted` を確実に付与 |
 | `srcObject` を assign する時点で video 要素がマウントされていない | `useEffect([stream])` で attach、CameraView 表示後に確実に走らせる |
-| `MediaTrackConstraintSet.torch` 未実装 | `getCapabilities().torch` で判定 → 未対応なら撮影直前に画面全体を白くする「画面光ライト」で代替 |
-| `beforeinstallprompt` 未実装 | iOS 検出して、共有ボタンの位置と手順を案内するモーダルを自前で実装 |
+| `MediaTrackConstraintSet.torch` は iOS Safari 未実装 | `getCapabilities().torch` で判定 → 未対応なら撮影直前に画面全体を白くする「画面光ライト」で代替。Android では本物の LED が点く |
+| `beforeinstallprompt` は iOS 未対応 / Android のみ | UA 検出で分岐。iOS は共有ボタン手順を案内、Android はイベントを捕まえて「インストール」ボタンを表示 |
 | Wake Lock は iOS 16.4+ | `'wakeLock' in navigator` でガード、未対応端末は素通し |
+| Android のシステム戻るボタン | `history.pushState` + `popstate` ベースのルーティングで自然に戻れる |
 
 ### 4. ストリーム管理の徹底
 

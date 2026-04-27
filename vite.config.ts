@@ -17,6 +17,8 @@ export default defineConfig({
         start_url: './',
         scope: './',
         display: 'standalone',
+        // Android Chrome では minimal-ui にフォールバックして UI を最大化
+        display_override: ['standalone', 'minimal-ui'],
         orientation: 'portrait',
         background_color: '#000000',
         theme_color: '#000000',

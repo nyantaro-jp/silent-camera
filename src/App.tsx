@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { CameraPage } from './pages/CameraPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { PhotoDetailPage } from './pages/PhotoDetailPage';
@@ -9,30 +9,54 @@ type Route =
   | { kind: 'history' }
   | { kind: 'detail'; photoId: number };
 
+const INITIAL_ROUTE: Route = { kind: 'camera' };
+
 export default function App() {
-  const [route, setRoute] = useState<Route>({ kind: 'camera' });
-  // 履歴の再読み込み用カウンタ
+  const [route, setRoute] = useState<Route>(INITIAL_ROUTE);
+  // 履歴一覧の再読み込み用カウンタ
   const [refreshKey, setRefreshKey] = useState(0);
+
+  // 初回マウント時に history の最初のエントリを camera に固定。
+  // これで Android の戻るボタンを押した時 popstate で kind:'camera' に戻れる。
+  useEffect(() => {
+    window.history.replaceState(INITIAL_ROUTE, '');
+  }, []);
+
+  // 戻るボタン (Android のシステム戻る、ブラウザの戻る、iOS のスワイプ戻る) と同期
+  useEffect(() => {
+    const onPopState = (e: PopStateEvent) => {
+      const next = (e.state as Route | null) ?? INITIAL_ROUTE;
+      setRoute(next);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  const navigate = useCallback((next: Route) => {
+    window.history.pushState(next, '');
+    setRoute(next);
+  }, []);
+
+  const goBack = useCallback(() => {
+    window.history.back();
+    // popstate ハンドラが setRoute する
+  }, []);
 
   const onPhotoSaved = useCallback(() => setRefreshKey((k) => k + 1), []);
 
   return (
     <>
-      {/* CameraPage は常時マウントしておくとカメラ起動の往復が無駄なので、
-          履歴 / 詳細を開いている間はオーバーレイで上に被せるだけにする方法もあるが、
-          無音カメラの主目的は「撮ったらすぐ写真確認 → 戻ってまた撮る」なので、
-          履歴を開く時点で一度ストリームを止める方が省電力でわかりやすい。 */}
       {route.kind === 'camera' && (
         <CameraPage
-          onOpenHistory={() => setRoute({ kind: 'history' })}
+          onOpenHistory={() => navigate({ kind: 'history' })}
           onPhotoSaved={onPhotoSaved}
         />
       )}
 
       {route.kind === 'history' && (
         <HistoryPage
-          onClose={() => setRoute({ kind: 'camera' })}
-          onOpenPhoto={(id) => setRoute({ kind: 'detail', photoId: id })}
+          onClose={goBack}
+          onOpenPhoto={(id) => navigate({ kind: 'detail', photoId: id })}
           refreshKey={refreshKey}
         />
       )}
@@ -40,10 +64,10 @@ export default function App() {
       {route.kind === 'detail' && (
         <PhotoDetailPage
           photoId={route.photoId}
-          onClose={() => setRoute({ kind: 'history' })}
+          onClose={goBack}
           onDeleted={() => {
             setRefreshKey((k) => k + 1);
-            setRoute({ kind: 'history' });
+            goBack();
           }}
         />
       )}
