@@ -3,6 +3,7 @@ import { CameraPage } from './pages/CameraPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { PhotoDetailPage } from './pages/PhotoDetailPage';
 import { InstallGuide } from './components/InstallGuide';
+import { InAppBrowserGuide } from './components/InAppBrowserGuide';
 
 type Route =
   | { kind: 'camera' }
@@ -73,6 +74,8 @@ export default function App() {
       )}
 
       <InstallGuide />
+      {/* 最後に置くことで z-index 関係なく一番上に重なる */}
+      <InAppBrowserGuide />
     </>
   );
 }
