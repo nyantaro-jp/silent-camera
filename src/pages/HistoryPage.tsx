@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Thumbnail } from '../components/Thumbnail';
-import { listPhotos, estimateUsageBytes, type PhotoRecord } from '../lib/storage';
+import { listMedia, estimateUsageBytes, type MediaRecord } from '../lib/storage';
+import { formatDuration } from '../lib/recorder';
 
 interface Props {
   onClose: () => void;
@@ -11,7 +12,7 @@ interface Props {
 const WARN_BYTES = 50 * 1024 * 1024;
 
 export function HistoryPage({ onClose, onOpenPhoto, refreshKey }: Props) {
-  const [photos, setPhotos] = useState<PhotoRecord[]>([]);
+  const [items, setItems] = useState<MediaRecord[]>([]);
   const [usage, setUsage] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -19,9 +20,9 @@ export function HistoryPage({ onClose, onOpenPhoto, refreshKey }: Props) {
     let cancelled = false;
     (async () => {
       setLoading(true);
-      const [list, used] = await Promise.all([listPhotos(), estimateUsageBytes()]);
+      const [list, used] = await Promise.all([listMedia(), estimateUsageBytes()]);
       if (cancelled) return;
-      setPhotos(list);
+      setItems(list);
       setUsage(used);
       setLoading(false);
     })();
@@ -58,18 +59,24 @@ export function HistoryPage({ onClose, onOpenPhoto, refreshKey }: Props) {
       <div className="flex-1 overflow-y-auto px-2 pb-8">
         {loading ? (
           <p className="mt-12 text-center text-sm text-white/60">読み込み中...</p>
-        ) : photos.length === 0 ? (
+        ) : items.length === 0 ? (
           <p className="mt-16 text-center text-sm text-white/60">まだ撮影がありません</p>
         ) : (
           <ul className="grid grid-cols-3 gap-1">
-            {photos.map((p) => (
-              <li key={p.id} className="aspect-square overflow-hidden bg-white/5">
+            {items.map((m) => (
+              <li key={m.id} className="relative aspect-square overflow-hidden bg-white/5">
                 <Thumbnail
-                  blob={p.blob}
-                  onClick={() => onOpenPhoto(p.id)}
+                  // 動画 Blob は <img> に流せないので poster (録画開始フレーム) を使う
+                  blob={m.kind === 'video' && m.poster ? m.poster : m.blob}
+                  onClick={() => onOpenPhoto(m.id)}
                   className="h-full w-full"
-                  alt={new Date(p.takenAt).toLocaleString('ja-JP')}
+                  alt={new Date(m.takenAt).toLocaleString('ja-JP')}
                 />
+                {m.kind === 'video' && (
+                  <span className="pointer-events-none absolute bottom-1 right-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] tabular-nums">
+                    ▶ {formatDuration(m.durationMs ?? 0)}
+                  </span>
+                )}
               </li>
             ))}
           </ul>

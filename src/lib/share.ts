@@ -42,3 +42,12 @@ export function buildFilename(takenAt: number, ext = 'jpg'): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `silent-camera-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.${ext}`;
 }
+
+/** MIME から共有/保存用の拡張子を決める */
+export function extFromMime(mime: string): string {
+  if (mime.includes('mp4')) return 'mp4';
+  if (mime.includes('webm')) return 'webm';
+  if (mime.includes('png')) return 'png';
+  if (mime.includes('jpeg') || mime.includes('jpg')) return 'jpg';
+  return 'bin';
+}

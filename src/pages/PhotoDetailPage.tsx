@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { deletePhoto, listPhotos, type PhotoRecord } from '../lib/storage';
+import { deleteMedia, listMedia, type MediaRecord } from '../lib/storage';
 import {
   buildFilename,
   downloadPhoto,
+  extFromMime,
   isFileShareSupported,
   sharePhoto,
 } from '../lib/share';
@@ -14,7 +15,7 @@ interface Props {
 }
 
 export function PhotoDetailPage({ photoId, onClose, onDeleted }: Props) {
-  const [photo, setPhoto] = useState<PhotoRecord | null>(null);
+  const [media, setMedia] = useState<MediaRecord | null>(null);
   const [url, setUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -24,10 +25,10 @@ export function PhotoDetailPage({ photoId, onClose, onDeleted }: Props) {
     let revoked: string | null = null;
     let cancelled = false;
     (async () => {
-      const all = await listPhotos();
+      const all = await listMedia();
       const target = all.find((p) => p.id === photoId) ?? null;
       if (cancelled) return;
-      setPhoto(target);
+      setMedia(target);
       if (target) {
         const u = URL.createObjectURL(target.blob);
         setUrl(u);
@@ -40,19 +41,23 @@ export function PhotoDetailPage({ photoId, onClose, onDeleted }: Props) {
     };
   }, [photoId]);
 
+  const isVideo = media?.kind === 'video';
+
   const onShare = async () => {
-    if (!photo) return;
+    if (!media) return;
     setBusy(true);
     setMessage(null);
     try {
-      const filename = buildFilename(photo.takenAt);
+      const filename = buildFilename(media.takenAt, extFromMime(media.blob.type));
       if (shareSupported) {
-        const result = await sharePhoto(photo.blob, filename);
+        const result = await sharePhoto(media.blob, filename);
         if (result === 'shared') setMessage('共有しました');
       } else {
-        downloadPhoto(photo.blob, filename);
+        downloadPhoto(media.blob, filename);
         setMessage(
-          'ダウンロードしました。Safari ダウンロードから「写真に保存」を選んでください',
+          'ダウンロードしました。Safari ダウンロードから「' +
+            (isVideo ? 'ビデオに保存' : '写真に保存') +
+            '」を選んでください',
         );
       }
     } catch (e) {
@@ -63,11 +68,11 @@ export function PhotoDetailPage({ photoId, onClose, onDeleted }: Props) {
   };
 
   const onDelete = async () => {
-    if (!photo) return;
-    if (!window.confirm('この写真を削除しますか？')) return;
+    if (!media) return;
+    if (!window.confirm(isVideo ? 'この動画を削除しますか？' : 'この写真を削除しますか？')) return;
     setBusy(true);
     try {
-      await deletePhoto(photo.id);
+      await deleteMedia(media.id);
       onDeleted();
     } finally {
       setBusy(false);
@@ -88,14 +93,25 @@ export function PhotoDetailPage({ photoId, onClose, onDeleted }: Props) {
           ← 戻る
         </button>
         <span className="text-xs text-white/60 tabular-nums">
-          {photo ? new Date(photo.takenAt).toLocaleString('ja-JP') : ''}
+          {media ? new Date(media.takenAt).toLocaleString('ja-JP') : ''}
         </span>
         <span className="w-16" />
       </header>
 
       <div className="flex flex-1 items-center justify-center overflow-hidden p-2">
         {url ? (
-          <img src={url} alt="" className="max-h-full max-w-full object-contain" />
+          isVideo ? (
+            // 再生 UI はブラウザネイティブに任せる。playsInline で iOS の全画面化を抑止。
+            // muted は不要 (そもそも音声トラックが無い) だが自動再生はしない。
+            <video
+              src={url}
+              controls
+              playsInline
+              className="max-h-full max-w-full object-contain"
+            />
+          ) : (
+            <img src={url} alt="" className="max-h-full max-w-full object-contain" />
+          )
         ) : (
           <p className="text-sm text-white/60">読み込み中...</p>
         )}
@@ -114,15 +130,15 @@ export function PhotoDetailPage({ photoId, onClose, onDeleted }: Props) {
         <button
           type="button"
           onClick={onShare}
-          disabled={busy || !photo}
+          disabled={busy || !media}
           className="flex-1 rounded-full bg-white py-3 text-sm font-semibold text-black active:scale-95 disabled:opacity-50"
         >
-          {shareSupported ? '共有 / 写真に保存' : 'ダウンロード'}
+          {shareSupported ? (isVideo ? '共有 / ビデオに保存' : '共有 / 写真に保存') : 'ダウンロード'}
         </button>
         <button
           type="button"
           onClick={onDelete}
-          disabled={busy || !photo}
+          disabled={busy || !media}
           className="rounded-full bg-red-500/90 px-5 py-3 text-sm font-semibold active:scale-95 disabled:opacity-50"
         >
           削除

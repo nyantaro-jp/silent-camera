@@ -3,6 +3,7 @@
 
 export type Resolution = 'high' | 'medium' | 'low';
 export type TimerSec = 0 | 3 | 10;
+export type CaptureMode = 'photo' | 'video';
 
 export interface AppSettings {
   gridEnabled: boolean;
@@ -12,6 +13,8 @@ export interface AppSettings {
   flashScreenEnabled: boolean;
   /** 暗所撮影用に撮影直前に画面を白くして照明として使う(トーチ非対応端末向け) */
   screenLightEnabled: boolean;
+  /** 写真 / 動画 の撮影モード。iOS 標準カメラ同様、前回のモードを記憶する */
+  captureMode: CaptureMode;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -20,6 +23,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   resolution: 'high',
   flashScreenEnabled: true,
   screenLightEnabled: false,
+  captureMode: 'photo',
 };
 
 const KEY = 'silent-camera:settings';

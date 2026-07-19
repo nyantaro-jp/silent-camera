@@ -5,6 +5,7 @@ import { TopBar } from '../components/TopBar';
 import { Grid } from '../components/Grid';
 import { CountdownOverlay } from '../components/CountdownOverlay';
 import { ZoomControl } from '../components/ZoomControl';
+import { ModeSwitch } from '../components/ModeSwitch';
 import {
   applyZoom,
   flipFacing,
@@ -17,8 +18,14 @@ import {
   type Facing,
   type ZoomCapability,
 } from '../lib/camera';
-import { captureFrame } from '../lib/capture';
-import { getLatestPhoto, savePhoto } from '../lib/storage';
+import { captureFrame, type CaptureResult } from '../lib/capture';
+import { getLatestMedia, savePhoto, saveVideo } from '../lib/storage';
+import {
+  formatDuration,
+  isRecordingSupported,
+  startRecording,
+  type RecorderHandle,
+} from '../lib/recorder';
 import { loadSettings, saveSettings, type AppSettings } from '../lib/settings';
 import { startWakeLock } from '../lib/wakelock';
 
@@ -62,6 +69,15 @@ export function CameraPage({ onOpenHistory, onPhotoSaved }: Props) {
   const [countdown, setCountdown] = useState<number | null>(null);
   const countdownTimerRef = useRef<number | null>(null);
 
+  // ---------- 録画 ----------
+  const videoSupported = isRecordingSupported();
+  const mode = videoSupported ? settings.captureMode : 'photo';
+  const [recording, setRecording] = useState(false);
+  const [recordingMs, setRecordingMs] = useState(0);
+  const recorderRef = useRef<RecorderHandle | null>(null);
+  const posterRef = useRef<CaptureResult | null>(null);
+  const recordingTimerRef = useRef<number | null>(null);
+
   // ---------- 起動 ----------
   const start = useCallback(
     async (nextFacing: Facing = facing) => {
@@ -88,7 +104,7 @@ export function CameraPage({ onOpenHistory, onPhotoSaved }: Props) {
     [facing, settings.resolution],
   );
 
-  // 解像度変更時はストリームを張り直す
+  // 解像度変更時はストリームを張り直す (録画中は TopBar 非表示なので発生しない)
   const lastResRef = useRef(settings.resolution);
   useEffect(() => {
     if (state !== 'running') {
@@ -100,13 +116,14 @@ export function CameraPage({ onOpenHistory, onPhotoSaved }: Props) {
     void start(facing);
   }, [settings.resolution, state, facing, start]);
 
-  // 直近サムネのロード
+  // 直近サムネのロード (動画は poster を使う)
   useEffect(() => {
     let revoked: string | null = null;
     (async () => {
-      const latest = await getLatestPhoto();
+      const latest = await getLatestMedia();
       if (latest) {
-        const url = URL.createObjectURL(latest.blob);
+        const source = latest.kind === 'video' && latest.poster ? latest.poster : latest.blob;
+        const url = URL.createObjectURL(source);
         setLatestThumb(url);
         revoked = url;
       }
@@ -131,6 +148,10 @@ export function CameraPage({ onOpenHistory, onPhotoSaved }: Props) {
     setTorchOn(false);
 
     return () => {
+      // ストリームを破棄する前に、録画が残っていれば破棄する
+      // (トラック停止で MediaRecorder も止まるが、明示 discard で確実に)
+      recorderRef.current?.discard();
+      recorderRef.current = null;
       stopStream(stream);
     };
   }, [stream]);
@@ -218,7 +239,7 @@ export function CameraPage({ onOpenHistory, onPhotoSaved }: Props) {
     }
   }, [stream, torchAvailable, torchOn]);
 
-  // ---------- 撮影 ----------
+  // ---------- 静止画撮影 ----------
   const doCapture = useCallback(async () => {
     const video = videoRef.current;
     if (!video || state !== 'running') return;
@@ -260,11 +281,94 @@ export function CameraPage({ onOpenHistory, onPhotoSaved }: Props) {
     }
   }, [state, settings.flashScreenEnabled, settings.screenLightEnabled, torchOn, onPhotoSaved]);
 
+  // ---------- 動画録画 ----------
+  const startVideoRecording = useCallback(async () => {
+    const video = videoRef.current;
+    if (!video || !stream || state !== 'running' || recorderRef.current) return;
+    if (!video.videoWidth || !video.videoHeight) {
+      setErrorMsg('カメラ映像の準備ができていません');
+      return;
+    }
+    try {
+      // 録画開始フレームをサムネイル (poster) として先に確保しておく
+      posterRef.current = await captureFrame(video, { type: 'image/jpeg', quality: 0.7 });
+
+      recorderRef.current = startRecording(stream);
+      setRecording(true);
+      setRecordingMs(0);
+      const startedAt = Date.now();
+      recordingTimerRef.current = window.setInterval(
+        () => setRecordingMs(Date.now() - startedAt),
+        500,
+      );
+    } catch (e) {
+      recorderRef.current = null;
+      setErrorMsg((e as Error).message);
+    }
+  }, [stream, state]);
+
+  const stopVideoRecording = useCallback(async () => {
+    const handle = recorderRef.current;
+    if (!handle) return;
+    recorderRef.current = null;
+    if (recordingTimerRef.current !== null) {
+      window.clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    setRecording(false);
+    try {
+      const result = await handle.stop();
+      const video = videoRef.current;
+      const poster = posterRef.current;
+      posterRef.current = null;
+
+      await saveVideo({
+        blob: result.blob,
+        width: video?.videoWidth ?? poster?.width ?? 0,
+        height: video?.videoHeight ?? poster?.height ?? 0,
+        takenAt: Date.now(),
+        durationMs: result.durationMs,
+        poster: poster?.blob ?? new Blob([], { type: 'image/jpeg' }),
+      });
+
+      // サムネは poster (静止画) を使う。動画 Blob は <img> に流せないため
+      if (poster) {
+        setLatestThumb((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return URL.createObjectURL(poster.blob);
+        });
+      }
+      onPhotoSaved();
+    } catch (e) {
+      setErrorMsg((e as Error).message);
+    }
+  }, [onPhotoSaved]);
+
+  // アンマウント時に録画タイマー解除
+  useEffect(() => {
+    return () => {
+      if (recordingTimerRef.current !== null) {
+        window.clearInterval(recordingTimerRef.current);
+      }
+    };
+  }, []);
+
+  // ---------- シャッター ----------
   const onShutter = useCallback(() => {
     if (state !== 'running') return;
+
+    // 録画中はタイマー設定に関わらず即停止
+    if (mode === 'video' && recording) {
+      void stopVideoRecording();
+      return;
+    }
+
     if (countdown !== null) return; // 二重押し防止
+
+    const fire = mode === 'video' ? startVideoRecording : doCapture;
+
     if (settings.timerSec === 0) {
-      void doCapture();
+      void fire();
       return;
     }
     let remain = settings.timerSec;
@@ -277,12 +381,21 @@ export function CameraPage({ onOpenHistory, onPhotoSaved }: Props) {
           countdownTimerRef.current = null;
         }
         setCountdown(null);
-        void doCapture();
+        void fire();
       } else {
         setCountdown(remain);
       }
     }, 1000);
-  }, [state, countdown, settings.timerSec, doCapture]);
+  }, [
+    state,
+    mode,
+    recording,
+    countdown,
+    settings.timerSec,
+    doCapture,
+    startVideoRecording,
+    stopVideoRecording,
+  ]);
 
   const cancelCountdown = useCallback(() => {
     if (countdownTimerRef.current !== null) {
@@ -303,9 +416,9 @@ export function CameraPage({ onOpenHistory, onPhotoSaved }: Props) {
 
   // ---------- 前後カメラ切替 ----------
   const onFlipCamera = useCallback(() => {
-    if (state !== 'running') return;
+    if (state !== 'running' || recording) return;
     void start(flipFacing(facing));
-  }, [state, facing, start]);
+  }, [state, recording, facing, start]);
 
   // ---------- レンダー ----------
   const isFront = facing === 'user';
@@ -340,16 +453,40 @@ export function CameraPage({ onOpenHistory, onPhotoSaved }: Props) {
         <>
           {settings.gridEnabled && <Grid />}
 
-          <TopBar
-            settings={settings}
-            onChange={updateSettings}
-            torchSupported={torchAvailable}
-            torchOn={torchOn}
-            onToggleTorch={onToggleTorch}
-          />
+          {/* 録画中は設定変更 (特に解像度=ストリーム再起動) を防ぐため TopBar を隠す */}
+          {!recording && (
+            <TopBar
+              settings={settings}
+              onChange={updateSettings}
+              torchSupported={torchAvailable}
+              torchOn={torchOn}
+              onToggleTorch={onToggleTorch}
+            />
+          )}
+
+          {/* 録画中インジケーター */}
+          {recording && (
+            <div
+              className="pointer-events-none absolute inset-x-0 z-10 flex justify-center"
+              style={{ top: 'calc(env(safe-area-inset-top) + 12px)' }}
+            >
+              <p className="flex items-center gap-2 rounded-full bg-black/50 px-4 py-1 text-sm tabular-nums ring-1 ring-white/20">
+                <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-red-500" />
+                {formatDuration(recordingMs)}
+              </p>
+            </div>
+          )}
 
           {showZoom && (
             <ZoomControl capability={zoomCap} value={zoomValue} onChange={onZoomChange} />
+          )}
+
+          {!recording && countdown === null && (
+            <ModeSwitch
+              mode={mode}
+              onChange={(next) => updateSettings({ captureMode: next })}
+              videoSupported={videoSupported}
+            />
           )}
 
           <Controls
@@ -359,6 +496,8 @@ export function CameraPage({ onOpenHistory, onPhotoSaved }: Props) {
             onFlipCamera={onFlipCamera}
             flipDisabled={!multipleCameras}
             disabled={countdown !== null}
+            mode={mode}
+            recording={recording}
           />
 
           {countdown !== null && (
